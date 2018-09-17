@@ -1,0 +1,282 @@
+import math
+
+x_pi = 3.14159265358979324 * 3000.0 / 180.0
+pi = 3.1415926535897932384626  
+a = 6378245.0  
+ee = 0.00669342162296594323 
+
+def _transformlat(lng, lat):
+    ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + \
+          0.1 * lng * lat + 0.2 * math.sqrt(math.fabs(lng))
+    ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
+            math.sin(2.0 * lng * pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(lat * pi) + 40.0 *
+            math.sin(lat / 3.0 * pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(lat / 12.0 * pi) + 320 *
+            math.sin(lat * pi / 30.0)) * 2.0 / 3.0
+    return ret
+//
+def _transformlng(lng, lat):
+    ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + \
+          0.1 * lng * lat + 0.1 * math.sqrt(math.fabs(lng))
+    ret += (20.0 * math.sin(6.0 * lng * pi) + 20.0 *
+            math.sin(2.0 * lng * pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(lng * pi) + 40.0 *
+            math.sin(lng / 3.0 * pi)) * 2.0 / 3.0
+    ret += (150.0 * math.sin(lng / 12.0 * pi) + 300.0 *
+            math.sin(lng / 30.0 * pi)) * 2.0 / 3.0
+    return ret
+
+def gcj02_to_wgs84(lng, lat):
+    dlat = _transformlat(lng - 105.0, lat - 35.0)
+    dlng = _transformlng(lng - 105.0, lat - 35.0)
+    radlat = lat / 180.0 * pi
+    magic = math.sin(radlat)
+    magic = 1 - ee * magic * magic
+    sqrtmagic = math.sqrt(magic)
+    dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * pi)
+    dlng = (dlng * 180.0) / (a / sqrtmagic * math.cos(radlat) * pi)
+    mglat = lat + dlat
+    mglng = lng + dlng
+    return [lng * 2 - mglng, lat * 2 - mglat]
+
+//
+
+def batchConvertCoordinates(sourceCoordinates, sourceEPSG, targetEPSG):
+    targetCoordinates = []
+    sourceProjection = osr.SpatialReference()
+    sourceProjection.ImportFromEPSG(sourceEPSG)
+    destinationProjection = osr.SpatialReference()
+    destinationProjection.ImportFromEPSG(targetEPSG)
+    coordTrans = osr.CoordinateTransformation(sourceProjection, destinationProjection)
+    for lon, lat in sourceCoordinates:
+        point = ogr.Geometry(ogr.wkbPoint)
+        point.AddPoint(lon,lat)
+        point.Transform(coordTrans)
+        targetCoordinates.append((point.GetX(), point.GetY()))
+    return targetCoordinates
+//
+
+import osr
+import csv
+from csv import *
+import numpy as np
+from numpy import *
+from osgeo import ogr
+import matplotlib.pyplot as plt
+import pandas as pd
+import csv
+import os
+
+def MoBike_Tracks_gcj02(path_of_the_raw_file,name_of_the_new_file):
+
+    cleaning_paths=[]
+    wgs_84_paths=[]
+    epsg_4979_paths=[]
+    lengths_of_paths=[]
+
+    with open(name_of_the_new_file,'w') as myfile:
+        wr=csv.writer(myfile)
+
+        with open(path_of_the_raw_file) as fp:
+            for index, line in enumerate(fp):
+                if index ==0 :
+                    print('index=0')
+            
+                elif '\\' in line:
+                    print('found a \ at line',index)
+        
+                elif '\.'in line :
+                    print('found a . at line',index)
+            
+                else :
+            
+                    path_index=[]
+                    head_index=line.split(',') #Create string each time there is a ","
+                    first_intermediary_longitude=head_index[9].replace("\"","") # line contains the latitude of the ending point then 'lat_end_point','""121.485','31.275#121.485','31.276#121.486
+            #need to remove specific characters like " 
+                    first_intermediary_latitude=head_index[10].split('#')[0] 
+                    try :
+                        first_intermediary_coordinate=(float(first_intermediary_longitude),float(first_intermediary_latitude))
+                    except ValueError:
+                        print(first_intermediary_longitude,first_intermediary_latitude)
+                        pass
+                    del head_index[9:] #remove the strings from ninth position to the end to obtain starting and ending points only
+                    try:
+                        start_index=(float(head_index[4]), float(head_index[5]))#tranform the string containing the starting point of the index path in a couple of integer
+                        end_index=(float(head_index[-2]),float(head_index[-1])) #transform the string containing the ending point of the index path in a couple of integer
+                    except ValueError:
+                        print(head_index[4],head_index[5])
+                        pass
+            
+                    track_index=line.split('#') #obtaining the intermediaries coordinates of the tracks which are seperated by'#'
+                    del track_index[0]
+                    track_index[-1]=track_index[-1].replace('"','') 
+                    for i in track_index:
+                        path_index.append(eval(i))
+            
+                    path_index.insert(0, start_index)
+                    path_index.insert(1,first_intermediary_coordinate)
+                    path_index.append(end_index)
+                    wr.writerow(path_index)
+                    cleaning_paths.append(path_index)
+
+            
+def MoBike_Tracks_wgs84(path_of_the_raw_file,name_of_the_new_file) :
+    
+    cleaning_paths=[]
+    wgs_84_paths=[]
+    epsg_4979_paths=[]
+    lengths_of_paths=[]
+
+    with open(path_of_the_raw_file) as fp:
+        for index, line in enumerate(fp):
+            if index ==0 :
+                print('index=0')
+            
+            elif '\\' in line:
+                print('found a \ at line',index)
+        
+            elif '\.'in line :
+                print('found a . at line',index)
+            
+            else :
+            
+                path_index=[]
+                head_index=line.split(',') #Create string each time there is a ","
+                first_intermediary_longitude=head_index[9].replace("\"","") # line contains the latitude of the ending point then 'lat_end_point','""121.485','31.275#121.485','31.276#121.486
+            #need to remove specific characters like " 
+                first_intermediary_latitude=head_index[10].split('#')[0] 
+                try :
+                    first_intermediary_coordinate=(float(first_intermediary_longitude),float(first_intermediary_latitude))
+                except ValueError:
+                    print(first_intermediary_longitude,first_intermediary_latitude)
+                    pass
+                del head_index[9:] #remove the strings from ninth position to the end to obtain starting and ending points only
+                try:
+                    start_index=(float(head_index[4]), float(head_index[5]))#tranform the string containing the starting point of the index path in a couple of integer
+                    end_index=(float(head_index[-2]),float(head_index[-1])) #transform the string containing the ending point of the index path in a couple of integer
+                except ValueError:
+                    print(head_index[4],head_index[5])
+                    pass
+            
+                track_index=line.split('#') #obtaining the intermediaries coordinates of the tracks which are seperated by'#'
+                del track_index[0]
+                track_index[-1]=track_index[-1].replace('"','') 
+                for i in track_index:
+                    path_index.append(eval(i))
+            
+                path_index.insert(0, start_index)
+                path_index.insert(1,first_intermediary_coordinate)
+                path_index.append(end_index)
+                cleaning_paths.append(path_index)
+    
+    with open(name_of_the_new_file,'w') as myfile:
+        wr=csv.writer(myfile)
+    
+        for k in range(0,len(cleaning_paths)): 
+            path_k=cleaning_paths[k]
+            wgs_84_path_k=[] #Be careful, do not mistake with wgs84_paths whose type is a list of lists
+    
+            for coordinate in path_k: # from couples in gcj geodetic system to couples in wgs-84 
+                shifted_coordinate=gcj02_to_wgs84(coordinate[0],coordinate[1])[0],gcj02_to_wgs84(coordinate[0],coordinate[1])[1]
+                wgs_84_path_k.append(shifted_coordinate)
+            wr.writerow(wgs_84_path_k)
+            wgs_84_paths.append(wgs_84_path_k)
+            
+def MoBike_Tracks_epsg_4979(path_of_the_raw_file,name_of_the_new_file):
+    
+    cleaning_paths=[]
+    wgs_84_paths=[]
+    epsg_4979_paths=[]
+    lengths_of_paths=[]
+
+    with open('path_of_the_raw_file') as fp:
+        for index, line in enumerate(fp):
+            if index ==0 :
+                print('index=0')
+            
+            elif '\\' in line:
+                print('found a \ at line',index)
+        
+            elif '\.'in line :
+                print('found a . at line',index)
+            
+            else :
+            
+                path_index=[]
+                head_index=line.split(',') #Create string each time there is a ","
+                first_intermediary_longitude=head_index[9].replace("\"","") # line contains the latitude of the ending point then 'lat_end_point','""121.485','31.275#121.485','31.276#121.486
+            #need to remove specific characters like " 
+                first_intermediary_latitude=head_index[10].split('#')[0] 
+                try :
+                    first_intermediary_coordinate=(float(first_intermediary_longitude),float(first_intermediary_latitude))
+                except ValueError:
+                    print(first_intermediary_longitude,first_intermediary_latitude)
+                    pass
+                del head_index[9:] #remove the strings from ninth position to the end to obtain starting and ending points only
+                try:
+                    start_index=(float(head_index[4]), float(head_index[5]))#tranform the string containing the starting point of the index path in a couple of integer
+                    end_index=(float(head_index[-2]),float(head_index[-1])) #transform the string containing the ending point of the index path in a couple of integer
+                except ValueError:
+                    print(head_index[4],head_index[5])
+                    pass
+            
+                track_index=line.split('#') #obtaining the intermediaries coordinates of the tracks which are seperated by'#'
+                del track_index[0]
+                track_index[-1]=track_index[-1].replace('"','') 
+                for i in track_index:
+                    path_index.append(eval(i))
+            
+                path_index.insert(0, start_index)
+                path_index.insert(1,first_intermediary_coordinate)
+                path_index.append(end_index)
+                cleaning_paths.append(path_index)
+    
+
+    
+    for k in range(0,len(cleaning_paths)): 
+        path_k=cleaning_paths[k]
+        wgs_84_path_k=[] #Be careful, do not mistake with wgs84_paths whose type is a list of lists
+    
+        for coordinate in path_k: # from couples in gcj geodetic system to couples in wgs-84 
+            shifted_coordinate=gcj02_to_wgs84(coordinate[0],coordinate[1])[0],gcj02_to_wgs84(coordinate[0],coordinate[1])[1]
+            wgs_84_path_k.append(shifted_coordinate)
+        wgs_84_paths.append(wgs_84_path_k)
+
+    with open(name_of_the_new_file,'w') as myfile:
+        wr=csv.writer(myfile)
+
+        for i in wgs_84_paths :
+            epsg_4979_path_i=batchConvertCoordinates(i,4326,4479) #projection of spheric coordinates in euclidian coordinates
+            wr.writerow(epsg_4979_path_i)
+            epsg_4979_paths.append(epsg_4979_path_i)
+           
+//
+
+import osr
+import csv
+from csv import *
+import numpy as np
+from numpy import *
+from osgeo import ogr
+import matplotlib.pyplot as plt
+import pandas as pd
+import csv
+import os
+
+def list_of_tracks_composed_by_tuples(name_of_cleaned_csv_file):
+    
+    T=[]
+    WGS_84=[]
+
+    csvfile=open(name_of_cleaned_csv_file,'r',encoding='utf-8') #To do not use all the memory of the virtual box, I should save a csv file containing the tracks in gcj02
+#But, as a csv file contains string, type of the couples is the same : '(lon, lat)'
+
+    lines=csv.reader(csvfile)
+    for line in lines:
+        t=[]
+        for i in line :
+            t.append(eval(i)) # Transform a string in a tuple : '(lon, lat)' -> (lon, lat)
+        T.append(t)
+    return (T)
